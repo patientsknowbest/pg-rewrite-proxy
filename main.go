@@ -10,20 +10,20 @@ import (
 )
 
 type PgRewriteProxyBackend struct {
-	backend  *pgproto3.Backend
-	frontend *pgproto3.Frontend
-	clientConn net.Conn
+	backend      *pgproto3.Backend
+	frontend     *pgproto3.Frontend
+	clientConn   net.Conn
 	upstreamConn net.Conn
-	rewriteFunc func(string)(string, error)
+	rewriteFunc  func(string) (string, error)
 }
 
-func NewPgRewriteProxyBackend(clientConn, upstreamConn net.Conn, rewriteFunc func(string)(string, error)) *PgRewriteProxyBackend {
+func NewPgRewriteProxyBackend(clientConn, upstreamConn net.Conn, rewriteFunc func(string) (string, error)) *PgRewriteProxyBackend {
 	return &PgRewriteProxyBackend{
-		backend:  pgproto3.NewBackend(pgproto3.NewChunkReader(clientConn), clientConn),
-		frontend: pgproto3.NewFrontend(pgproto3.NewChunkReader(upstreamConn), upstreamConn),
-		clientConn: clientConn,
+		backend:      pgproto3.NewBackend(pgproto3.NewChunkReader(clientConn), clientConn),
+		frontend:     pgproto3.NewFrontend(pgproto3.NewChunkReader(upstreamConn), upstreamConn),
+		clientConn:   clientConn,
 		upstreamConn: upstreamConn,
-		rewriteFunc: rewriteFunc,
+		rewriteFunc:  rewriteFunc,
 	}
 }
 
@@ -40,7 +40,7 @@ func (p *PgRewriteProxyBackend) Run() error {
 		}
 
 		if q, ok := msg.(*pgproto3.Query); ok {
-			fmt.Printf("Query is %v\n", q.String)
+			log.Printf("Query is %v\n", q.String)
 			newQuery, err := p.rewriteFunc(q.String)
 			if err != nil {
 				not := &pgproto3.NoticeResponse{
@@ -53,11 +53,11 @@ func (p *PgRewriteProxyBackend) Run() error {
 					return err
 				}
 			} else {
-				fmt.Printf("Rewritten to %v\n", newQuery)
+				log.Printf("Rewritten to %v\n", newQuery)
 				q.String = newQuery
 			}
 		}
-		
+
 		err = p.frontend.Send(msg)
 		if err != nil {
 			return err
@@ -74,7 +74,7 @@ func (p *PgRewriteProxyBackend) handleStartup() error {
 	if err != nil {
 		return fmt.Errorf("error receiving startup message: %w", err)
 	}
-	
+
 	if _, ok := startupMessage.(*pgproto3.SSLRequest); ok {
 		_, err = p.clientConn.Write([]byte("N"))
 		if err != nil {
@@ -118,14 +118,14 @@ func (p *PgRewriteProxyBackend) Close() error {
 		return err
 	} else if err2 != nil {
 		return err2
-	} 
+	}
 	return nil
 }
 
 var options struct {
 	listenAddress string
 	upstream      string
-	luaFile string
+	luaFile       string
 }
 
 func main() {
@@ -134,7 +134,7 @@ func main() {
 	flag.StringVar(&options.luaFile, "luaFile", "rewrite.lua", "LUA file containing rewrite function")
 	flag.Parse()
 
-	// Setup lua interpreter 
+	// Setup lua interpreter
 	l := lua.NewState()
 	defer l.Close()
 	if err := l.DoFile(options.luaFile); err != nil {
@@ -145,7 +145,7 @@ func main() {
 	if _, ok := rfn.(*lua.LFunction); !ok {
 		log.Fatalf("Unable to find rewrite function in lua file %s\n", options.luaFile)
 	}
-	
+
 	rewritefn := func(input string) (string, error) {
 		err := l.CallByParam(lua.P{
 			Fn:      rfn,
@@ -164,18 +164,18 @@ func main() {
 			return input, fmt.Errorf("Incorrect return type from rewrite function %s", rValue.Type())
 		}
 	}
-	
+
 	_, err := rewritefn("foo")
 	if err != nil {
 		log.Fatal(err)
 	}
-	
-	
+
 	ln, err := net.Listen("tcp", options.listenAddress)
 	if err != nil {
 		log.Fatal(err)
 	}
-	
+	log.Printf("Listening on %s", options.listenAddress)
+
 	for {
 		conn, err := ln.Accept()
 		if err != nil {
