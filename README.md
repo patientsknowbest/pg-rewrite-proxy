@@ -15,7 +15,7 @@ All other messages than Query are passed to the upstream unmodified. SSL connect
 
 ## Build from source:
 ```
-go build -o pg-rewrite-proxy main.go
+CGO_ENABLED=0 go build -o pg-rewrite-proxy main.go
 ``` 
 
 ## Usage:
