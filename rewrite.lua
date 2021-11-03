@@ -1,6 +1,13 @@
 function rewrite(a)
-    if a:find("bar") then 
-        error("I don't like bar")
-    end
-	return a:gsub("foo", "baz")
+    return a:gsub("foo", "baz")
+end 
+
+-- Called when a simple Query message is received
+function rewriteQuery(a)
+    return rewrite(a)
+end
+
+-- Called with extended query is submitted
+function rewriteParse(a)
+    return rewrite(a)
 end
