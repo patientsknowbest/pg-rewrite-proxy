@@ -26,12 +26,34 @@ func NewPgRewriteProxy(clientConn, upstreamConn net.Conn, rewriter QueryRewriter
 }
 
 func (p *PgRewriteProxy) Run() error {
-	err := p.handleStartup()
+	// Startup message is special
+	var startupMessage pgproto3.FrontendMessage
+	var err error
+	for {
+		startupMessage, err = p.backend.ReceiveStartupMessage()
+		if err != nil {
+			return fmt.Errorf("error receiving startup message: %w", err)
+		}
+		// We can't support SSL otherwise we can't modify queries
+		_, isSsl := startupMessage.(*pgproto3.SSLRequest)
+		_, isGss := startupMessage.(*pgproto3.GSSEncRequest)
+		if isSsl || isGss {
+			_, err = p.clientConn.Write([]byte("N"))
+			if err != nil {
+				return fmt.Errorf("error sending deny SSL request: %w", err)
+			}
+		} else {
+			break
+		}
+	}
+
+	// Pass on the startup message
+	err = p.frontend.Send(startupMessage)
 	if err != nil {
 		return err
 	}
 
-	// Separate goroutines for messages back & forth
+	// Boot two loops, one for inbound, one for outbound
 	errc := make(chan error)
 	go func() {
 		for {
@@ -100,6 +122,7 @@ func (p *PgRewriteProxy) Run() error {
 			}
 		}
 	}()
+	// Wait for either loop to exit
 	err = <-errc
 	return err
 }
@@ -125,40 +148,6 @@ func (p *PgRewriteProxy) sendRewriteError(rewriteErr error) error {
 		Detail:   rewriteErr.Error(),
 	}
 	return p.backend.Send(not)
-}
-
-func (p *PgRewriteProxy) handleStartup() error {
-	startupMessage, err := p.backend.ReceiveStartupMessage()
-	if err != nil {
-		return fmt.Errorf("error receiving startup message: %w", err)
-	}
-
-	if _, ok := startupMessage.(*pgproto3.SSLRequest); ok {
-		_, err = p.clientConn.Write([]byte("N"))
-		if err != nil {
-			return fmt.Errorf("error sending deny SSL request: %w", err)
-		}
-		return p.handleStartup()
-	} else {
-		err = p.frontend.Send(startupMessage)
-		if err != nil {
-			return err
-		}
-		for {
-			bm, err := p.frontend.Receive()
-			if err != nil {
-				return err
-			}
-			err = p.backend.Send(bm)
-			if err != nil {
-				return err
-			}
-			if _, ok := bm.(*pgproto3.ReadyForQuery); ok {
-				break
-			}
-		}
-	}
-	return nil
 }
 
 func (p *PgRewriteProxy) Close() error {

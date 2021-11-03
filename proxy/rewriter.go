@@ -3,6 +3,7 @@ package proxy
 import (
 	"fmt"
 	lua "github.com/yuin/gopher-lua"
+	"strings"
 )
 
 // Generic query rewriter interface
@@ -11,14 +12,41 @@ type QueryRewriter interface {
 	RewriteParse(string) (string, error)
 }
 
-// LUA interpreter implementation
-type LuaQueryRewriter struct {
-	l            *lua.LState
-	rewriteQuery *lua.LFunction
-	rewriteParse *lua.LFunction
+// Dumb String replacement implementation
+type StringRewriter struct {
+	replacements map[string]string
 }
 
-func (r *LuaQueryRewriter) rewriteInternal(input string, fn *lua.LFunction) (string, error) {
+func NewStringRewriter(replacements map[string]string) *StringRewriter {
+	return &StringRewriter{replacements: replacements}
+}
+
+func (r *StringRewriter) RewriteQuery(query string) (string, error) {
+	return r.rewriteInternal(query)
+}
+
+func (r *StringRewriter) RewriteParse(query string) (string, error) {
+	return r.rewriteInternal(query)
+}
+
+func (r *StringRewriter) rewriteInternal(query string) (string, error) {
+	for k, v := range r.replacements {
+		query = strings.ReplaceAll(query, k, v)
+	}
+	return query, nil
+}
+
+// LUA interpreter implementation
+type LuaQueryRewriter struct {
+	// TODO: MFA - LState isn't safe to share between goroutines, this needs rework.
+	l *lua.LState
+}
+
+func (r *LuaQueryRewriter) rewriteInternal(input, function string) (string, error) {
+	fn, ok := r.l.GetGlobal(function).(*lua.LFunction)
+	if !ok {
+		return input, fmt.Errorf("Unable to find %s function!", function)
+	}
 	err := r.l.CallByParam(lua.P{
 		Fn:      fn,
 		NRet:    1,
@@ -37,11 +65,11 @@ func (r *LuaQueryRewriter) rewriteInternal(input string, fn *lua.LFunction) (str
 }
 
 func (r *LuaQueryRewriter) RewriteQuery(query string) (string, error) {
-	return r.rewriteInternal(query, r.rewriteQuery)
+	return r.rewriteInternal(query, "rewriteQuery")
 }
 
 func (r *LuaQueryRewriter) RewriteParse(query string) (string, error) {
-	return r.rewriteInternal(query, r.rewriteParse)
+	return r.rewriteInternal(query, "rewriteParse")
 }
 
 func (r *LuaQueryRewriter) Close() error {
@@ -54,17 +82,7 @@ func NewLuaQueryRewriter(luaFile string) (*LuaQueryRewriter, error) {
 	if err := l.DoFile(luaFile); err != nil {
 		return nil, err
 	}
-	rewriteQuery, ok := l.GetGlobal("rewriteQuery").(*lua.LFunction)
-	if !ok {
-		return nil, fmt.Errorf("Unable to find rewriteQuery function in lua file %s\n", luaFile)
-	}
-	rewriteParse := l.GetGlobal("rewriteParse").(*lua.LFunction)
-	if !ok {
-		return nil, fmt.Errorf("Unable to find rewriteParse function in lua file %s\n", luaFile)
-	}
 	return &LuaQueryRewriter{
-		l:            l,
-		rewriteQuery: rewriteQuery,
-		rewriteParse: rewriteParse,
+		l: l,
 	}, nil
 }

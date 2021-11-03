@@ -1,5 +1,5 @@
 function rewrite(a)
-    return a:gsub("foo", "baz")
+    return a:gsub("current_timestamp", "now()")
 end 
 
 -- Called when a simple Query message is received
