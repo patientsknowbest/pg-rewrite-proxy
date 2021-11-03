@@ -12,3 +12,5 @@ require (
 	github.com/jackc/chunkreader/v2 v2.0.0 // indirect
 	github.com/jackc/pgio v1.0.0 // indirect
 )
+
+replace github.com/jackc/pgproto3/v2 v2.1.1 => github.com/patientsknowbest/pgproto3/v2 v2.1.2-0.20211103194614-9d46cb0aecb9
