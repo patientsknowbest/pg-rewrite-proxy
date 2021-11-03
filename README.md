@@ -3,8 +3,8 @@ pg-rewrite-proxy
 
 A reverse proxy for postgres which rewrites queries.
 
-Arbitrary rewriting is supported by supplying an LUA script to the proxy application, with a single 'rewrite'
-function for rewriting the query.
+Arbitrary rewriting is supported by supplying an LUA script to the proxy application, with 'rewriteQuery' and 'rewriteParse'
+functions for rewriting the query. Note the latter is used for the [extended query protocol](https://www.postgresql.org/docs/13/protocol-flow.html#PROTOCOL-FLOW-EXT-QUERY). Rewriting query parameters supplied with Bind is not yet supported.
 
 Failure to rewrite the query will raise a NOTICE but it will not cause an error.
 
