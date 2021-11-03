@@ -33,40 +33,61 @@ func (p *PgRewriteProxyBackend) Run() error {
 		return err
 	}
 
-	for {
-		msg, err := p.backend.Receive()
-		if err != nil {
-			return fmt.Errorf("error receiving message: %w", err)
-		}
-
-		if q, ok := msg.(*pgproto3.Query); ok {
-			log.Printf("Query is %v\n", q.String)
-			newQuery, err := p.rewriteFunc(q.String)
+	// Separate goroutines for messages back & forth
+	errc := make(chan error)
+	go func() {
+		for {
+			msg, err := p.backend.Receive()
 			if err != nil {
-				not := &pgproto3.NoticeResponse{
-					Severity: "WARNING",
-					Message:  "Failed to rewrite query",
-					Detail:   err.Error(),
-				}
-				err = p.backend.Send(not)
+				errc <- err
+				return
+			}
+
+			if q, ok := msg.(*pgproto3.Query); ok {
+				log.Printf("Query is %v\n", q.String)
+				newQuery, err := p.rewriteFunc(q.String)
 				if err != nil {
-					return err
+					not := &pgproto3.NoticeResponse{
+						Severity: "WARNING",
+						Message:  "Failed to rewrite query",
+						Detail:   err.Error(),
+					}
+					err = p.backend.Send(not)
+					if err != nil {
+						errc <- err
+						return
+					}
+				} else {
+					log.Printf("Rewritten to %v\n", newQuery)
+					q.String = newQuery
 				}
-			} else {
-				log.Printf("Rewritten to %v\n", newQuery)
-				q.String = newQuery
+			}
+
+			err = p.frontend.Send(msg)
+			if err != nil {
+				errc <- err
+				return
 			}
 		}
-
-		err = p.frontend.Send(msg)
-		if err != nil {
-			return err
+	}()
+	go func() {
+		for {
+			for {
+				bm, err := p.frontend.Receive()
+				if err != nil {
+					errc <- err
+					return
+				}
+				err = p.backend.Send(bm)
+				if err != nil {
+					errc <- err
+					return
+				}
+			}
 		}
-		err = p.readUntilReady()
-		if err != nil {
-			return err
-		}
-	}
+	}()
+	err = <-errc
+	return err
 }
 
 func (p *PgRewriteProxyBackend) handleStartup() error {
@@ -86,26 +107,18 @@ func (p *PgRewriteProxyBackend) handleStartup() error {
 		if err != nil {
 			return err
 		}
-		err = p.readUntilReady()
-		if err != nil {
-			return err
-		}
-	}
-	return nil
-}
-
-func (p *PgRewriteProxyBackend) readUntilReady() error {
-	for {
-		bm, err := p.frontend.Receive()
-		if err != nil {
-			return err
-		}
-		err = p.backend.Send(bm)
-		if err != nil {
-			return err
-		}
-		if _, ok := bm.(*pgproto3.ReadyForQuery); ok {
-			break
+		for {
+			bm, err := p.frontend.Receive()
+			if err != nil {
+				return err
+			}
+			err = p.backend.Send(bm)
+			if err != nil {
+				return err
+			}
+			if _, ok := bm.(*pgproto3.ReadyForQuery); ok {
+				break
+			}
 		}
 	}
 	return nil
