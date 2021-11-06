@@ -2,9 +2,11 @@ package proxy
 
 import (
 	"fmt"
+	"log"
+	"net"
+
 	"github.com/jackc/pgproto3/v2"
 	"github.com/sergi/go-diff/diffmatchpatch"
-	"net"
 )
 
 type PgRewriteProxy struct {
@@ -170,4 +172,27 @@ func (p *PgRewriteProxy) Close() error {
 		return err2
 	}
 	return nil
+}
+
+func RunProxy(ln net.Listener, upstream string, rewriterFactory QueryRewriterFactory) error {
+	for {
+		conn, err := ln.Accept()
+		if err != nil {
+			return err
+		}
+		upstreamConn, err := net.Dial("tcp", upstream)
+		if err == nil {
+			b := NewPgRewriteProxy(conn, upstreamConn, rewriterFactory)
+			go func() {
+				defer b.Close()
+				err := b.Run()
+				if err != nil {
+					log.Println(err)
+				}
+				log.Println("Closed connection from", conn.RemoteAddr())
+			}()
+		} else {
+			log.Println(err)
+		}
+	}
 }

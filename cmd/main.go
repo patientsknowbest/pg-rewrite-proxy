@@ -7,7 +7,7 @@ import (
 	"net"
 	"strings"
 
-	proxy "github.com/patientsknowbest/pg-rewrite-proxy"
+	"github.com/patientsknowbest/pg-rewrite-proxy"
 )
 
 var options struct {
@@ -26,6 +26,18 @@ func (i *arrayFlags) String() string {
 func (i *arrayFlags) Set(value string) error {
 	*i = append(*i, value)
 	return nil
+}
+
+func parseReplacementRules(args []string) (map[string]string, error) {
+	res := make(map[string]string, len(args))
+	for _, arg := range args {
+		toks := strings.Split(arg, "/")
+		if len(toks) < 2 {
+			return nil, fmt.Errorf("invalid replacement rule %v", arg)
+		}
+		res[toks[0]] = toks[1]
+	}
+	return res, nil
 }
 
 func main() {
@@ -54,37 +66,6 @@ func main() {
 		log.Fatal(err)
 	}
 	log.Printf("Listening on %s", options.listenAddress)
-
-	for {
-		conn, err := ln.Accept()
-		if err != nil {
-			log.Fatal(err)
-		}
-		upstreamConn, err := net.Dial("tcp", options.upstream)
-		if err == nil {
-			b := proxy.NewPgRewriteProxy(conn, upstreamConn, rewriterFactory)
-			go func() {
-				defer b.Close()
-				err := b.Run()
-				if err != nil {
-					log.Println(err)
-				}
-				log.Println("Closed connection from", conn.RemoteAddr())
-			}()
-		} else {
-			log.Println(err)
-		}
-	}
-}
-
-func parseReplacementRules(args []string) (map[string]string, error) {
-	res := make(map[string]string, len(args))
-	for _, arg := range args {
-		toks := strings.Split(arg, "/")
-		if len(toks) < 2 {
-			return nil, fmt.Errorf("invalid replacement rule %v", arg)
-		}
-		res[toks[0]] = toks[1]
-	}
-	return res, nil
+	defer ln.Close()
+	log.Fatal(proxy.RunProxy(ln, options.upstream, rewriterFactory))
 }
