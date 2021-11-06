@@ -1,4 +1,4 @@
-module pg-rewrite-proxy
+module github.com/patientsknowbest/pg-rewrite-proxy
 
 go 1.17
 

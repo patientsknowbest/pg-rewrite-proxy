@@ -12,14 +12,14 @@ type PgRewriteProxy struct {
 	frontend     *pgproto3.Frontend
 	clientConn   net.Conn
 	upstreamConn net.Conn
-	rewriter     QueryRewriter
+	rewriterFactory     QueryRewriterFactory
 }
 
-func NewPgRewriteProxy(clientConn, upstreamConn net.Conn, rewriter QueryRewriter) *PgRewriteProxy {
+func NewPgRewriteProxy(clientConn, upstreamConn net.Conn, rewriterFactory QueryRewriterFactory) *PgRewriteProxy {
 	return &PgRewriteProxy{
 		backend:      pgproto3.NewBackend(pgproto3.NewChunkReader(clientConn), clientConn),
 		frontend:     pgproto3.NewFrontend(pgproto3.NewChunkReader(upstreamConn), upstreamConn),
-		rewriter:     rewriter,
+		rewriterFactory:     rewriterFactory,
 		clientConn:   clientConn,
 		upstreamConn: upstreamConn,
 	}
@@ -56,6 +56,11 @@ func (p *PgRewriteProxy) Run() error {
 	// Boot two loops, one for inbound, one for outbound
 	errc := make(chan error)
 	go func() {
+		rewriter, err := p.rewriterFactory.Create()
+		if err != nil {
+			errc <- err
+			return
+		}
 		for {
 			msg, err := p.backend.Receive()
 			if err != nil {
@@ -64,7 +69,7 @@ func (p *PgRewriteProxy) Run() error {
 			}
 
 			if queryMsg, ok := msg.(*pgproto3.Query); ok {
-				newQuery, rewriteErr := p.rewriter.RewriteQuery(queryMsg.String)
+				newQuery, rewriteErr := rewriter.RewriteQuery(queryMsg.String)
 				if rewriteErr != nil {
 					err := p.sendRewriteError(rewriteErr)
 					if err != nil {
@@ -73,14 +78,18 @@ func (p *PgRewriteProxy) Run() error {
 					}
 				} else {
 					if queryMsg.String != newQuery {
-						p.sendRewriteNotice(queryMsg.String, newQuery)
+						err = p.sendRewriteNotice(queryMsg.String, newQuery)
+						if err != nil {
+							errc <- err
+							return
+						}
 					}
 					queryMsg.String = newQuery
 				}
 			}
 
 			if parseMsg, ok := msg.(*pgproto3.Parse); ok {
-				newQuery, rewriteErr := p.rewriter.RewriteParse(parseMsg.Query)
+				newQuery, rewriteErr := rewriter.RewriteParse(parseMsg.Query)
 				if rewriteErr != nil {
 					err := p.sendRewriteError(rewriteErr)
 					if err != nil {
@@ -89,7 +98,11 @@ func (p *PgRewriteProxy) Run() error {
 					}
 				} else {
 					if parseMsg.Query != newQuery {
-						p.sendRewriteNotice(parseMsg.Query, newQuery)
+						err = p.sendRewriteNotice(parseMsg.Query, newQuery)
+						if err != nil {
+							errc <- err
+							return
+						}
 					}
 					parseMsg.Query = newQuery
 				}
@@ -108,17 +121,15 @@ func (p *PgRewriteProxy) Run() error {
 	}()
 	go func() {
 		for {
-			for {
-				bm, err := p.frontend.Receive()
-				if err != nil {
-					errc <- err
-					return
-				}
-				err = p.backend.Send(bm)
-				if err != nil {
-					errc <- err
-					return
-				}
+			bm, err := p.frontend.Receive()
+			if err != nil {
+				errc <- err
+				return
+			}
+			err = p.backend.Send(bm)
+			if err != nil {
+				errc <- err
+				return
 			}
 		}
 	}()

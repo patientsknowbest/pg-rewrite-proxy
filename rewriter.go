@@ -2,9 +2,15 @@ package proxy
 
 import (
 	"fmt"
-	lua "github.com/yuin/gopher-lua"
 	"strings"
+
+	lua "github.com/yuin/gopher-lua"
 )
+
+/// Rewriters will be constructed per goroutine, as some of them may have state that isn't safe to share
+type QueryRewriterFactory interface {
+	Create() (QueryRewriter, error)
+}
 
 // Generic query rewriter interface
 type QueryRewriter interface {
@@ -17,8 +23,18 @@ type StringRewriter struct {
 	replacements map[string]string
 }
 
-func NewStringRewriter(replacements map[string]string) *StringRewriter {
-	return &StringRewriter{replacements: replacements}
+type StringRewriterFactory struct {
+	replacements map[string]string
+}
+
+func NewStringRewriterFactory(replacments map[string]string) *StringRewriterFactory {
+	return &StringRewriterFactory{
+		replacements: replacments,
+	}
+}
+
+func (r *StringRewriterFactory) Create() (QueryRewriter, error) {
+	return &StringRewriter{replacements: r.replacements}, nil
 }
 
 func (r *StringRewriter) RewriteQuery(query string) (string, error) {
@@ -38,8 +54,32 @@ func (r *StringRewriter) rewriteInternal(query string) (string, error) {
 
 // LUA interpreter implementation
 type LuaQueryRewriter struct {
-	// TODO: MFA - LState isn't safe to share between goroutines, this needs rework.
+	// It's not safe to share this between goroutines
 	l *lua.LState
+}
+
+type LuaQueryRewriterFactory struct {
+	luaFile string
+}
+
+func NewLuaQueryRewriterFactory(luaFile string) QueryRewriterFactory {
+	return &LuaQueryRewriterFactory{
+		luaFile: luaFile,
+	}
+}
+
+func (r *LuaQueryRewriterFactory) Create() (QueryRewriter, error) {
+	l := lua.NewState()
+	if err := l.DoFile(r.luaFile); err != nil {
+		return nil, err
+	}
+	return &LuaQueryRewriter{
+		l: l,
+	}, nil
+}
+
+func (r *LuaQueryRewriter) RewriteQuery(query string) (string, error) {
+	return r.rewriteInternal(query, "rewriteQuery")
 }
 
 func (r *LuaQueryRewriter) rewriteInternal(input, function string) (string, error) {
@@ -64,10 +104,6 @@ func (r *LuaQueryRewriter) rewriteInternal(input, function string) (string, erro
 	}
 }
 
-func (r *LuaQueryRewriter) RewriteQuery(query string) (string, error) {
-	return r.rewriteInternal(query, "rewriteQuery")
-}
-
 func (r *LuaQueryRewriter) RewriteParse(query string) (string, error) {
 	return r.rewriteInternal(query, "rewriteParse")
 }
@@ -75,14 +111,4 @@ func (r *LuaQueryRewriter) RewriteParse(query string) (string, error) {
 func (r *LuaQueryRewriter) Close() error {
 	r.l.Close()
 	return nil
-}
-
-func NewLuaQueryRewriter(luaFile string) (*LuaQueryRewriter, error) {
-	l := lua.NewState()
-	if err := l.DoFile(luaFile); err != nil {
-		return nil, err
-	}
-	return &LuaQueryRewriter{
-		l: l,
-	}, nil
 }
