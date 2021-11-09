@@ -10,6 +10,8 @@ Failure to rewrite the query will raise a NOTICE but it will not cause an error.
 
 All other messages than Query are passed to the upstream unmodified. SSL connections are not supported.
 
+Binaries for linux amd64 and arm64 are available on the [releases](https://github.com/patientsknowbest/pg-rewrite-proxy/releases/latest) page. For other architectures please build from source.
+
 ## Prerequisites:
 - Go 1.17 or greater
 
