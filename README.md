@@ -17,7 +17,7 @@ Binaries for linux amd64 and arm64 are available on the [releases](https://githu
 
 ## Build from source:
 ```
-CGO_ENABLED=0 go build -o pg-rewrite-proxy main.go
+CGO_ENABLED=0 go build -o pg-rewrite-proxy cmd/main.go
 ``` 
 
 ## Usage:
