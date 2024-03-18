@@ -3,7 +3,7 @@ module github.com/patientsknowbest/pg-rewrite-proxy
 go 1.17
 
 require (
-	github.com/jackc/pgproto3/v2 v2.3.2
+	github.com/jackc/pgproto3/v2 v2.3.3
 	github.com/jackc/pgx/v4 v4.13.0
 	github.com/sergi/go-diff v1.3.1
 	github.com/yuin/gopher-lua v1.1.1
